@@ -11,7 +11,6 @@ import {
   Database,
   FilePlus2,
   FolderClosed,
-  HardDrive,
   LayoutDashboard,
   LockKeyhole,
   Plus,
