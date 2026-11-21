@@ -1,6 +1,6 @@
 {
   "name": "unidb-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "UniDB Desktop — a desktop database workspace for UniDB.",
   "main": "out/main/index.js",
@@ -15,7 +15,8 @@
     "@vitejs/plugin-react": "^4.5.2",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "unidb-node": "^0.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.0",

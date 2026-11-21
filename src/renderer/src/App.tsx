@@ -1,190 +1,197 @@
 import { useEffect, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import {
-  Activity,
-  ArrowDownToLine,
-  ArrowLeftRight,
-  ChevronDown,
-  CircleHelp,
-  Clock3,
-  Code2,
-  Command,
-  Database,
-  FilePlus2,
-  FolderClosed,
-  LayoutDashboard,
-  LockKeyhole,
-  Plus,
-  Search,
-  Settings2,
-  ShieldCheck,
-  Sparkles,
-  Table2,
-  TerminalSquare,
-  Wifi
+  Check, ChevronDown, CircleHelp, Code2, Database, History, LoaderCircle,
+  Plus, Play, PlugZap, Settings2, ShieldCheck, Trash2, X
 } from 'lucide-react'
 
-type NavItem = {
-  label: string
-  icon: typeof LayoutDashboard
-}
-
-const primaryNav: NavItem[] = [
-  { label: 'Overview', icon: LayoutDashboard },
-  { label: 'SQL workspace', icon: Code2 },
-  { label: 'Tables', icon: Table2 }
-]
+type SavedConnection = { id: string; name: string; host: string; port: number }
+type QueryResult =
+  | { ok: true; kind: 'rows'; columns: Array<{ name: string; type: string }>; rows: Array<Array<string | number>> }
+  | { ok: true; kind: 'command'; message: string; affected_rows: number }
 
 function App(): React.JSX.Element {
-  const [activeNav, setActiveNav] = useState('Overview')
-  const [appVersion, setAppVersion] = useState('0.1.0')
+  const [connections, setConnections] = useState<SavedConnection[]>([])
+  const [activeConnection, setActiveConnection] = useState<SavedConnection | null>(null)
+  const [showConnectionForm, setShowConnectionForm] = useState(false)
+  const [connectionName, setConnectionName] = useState('Local UniDB')
+  const [host, setHost] = useState('127.0.0.1')
+  const [port, setPort] = useState('7432')
+  const [query, setQuery] = useState('SELECT * FROM users;')
+  const [result, setResult] = useState<QueryResult | null>(null)
+  const [queryError, setQueryError] = useState('')
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState('Not connected')
+  const [appVersion, setAppVersion] = useState('0.2.0')
 
   useEffect(() => {
-    void window.desktop.getAppVersion().then(setAppVersion)
+    void Promise.all([window.desktop.listConnections(), window.desktop.getAppVersion()])
+      .then(([saved, version]) => {
+        setConnections(saved)
+        setAppVersion(version)
+      })
+      .catch((error: Error) => setStatus(error.message))
   }, [])
+
+  async function saveConnection(): Promise<void> {
+    const numericPort = Number(port)
+    if (!connectionName.trim() || !host.trim() || !Number.isInteger(numericPort) || numericPort < 1 || numericPort > 65535) {
+      setStatus('Enter a connection name, host and valid port.')
+      return
+    }
+    try {
+      const saved = await window.desktop.saveConnection({
+        name: connectionName.trim(),
+        host: host.trim(),
+        port: numericPort
+      })
+      setConnections(saved)
+      setShowConnectionForm(false)
+      setStatus('Connection saved')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not save connection')
+    }
+  }
+
+  async function connectTo(connection: SavedConnection): Promise<void> {
+    setBusy(true)
+    setStatus('Connecting…')
+    try {
+      const connected = await window.desktop.connect(connection.id)
+      setActiveConnection(connected)
+      setStatus('Connected')
+      setQueryError('')
+    } catch (error) {
+      setActiveConnection(null)
+      setStatus(error instanceof Error ? error.message : 'Connection failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function disconnect(): Promise<void> {
+    await window.desktop.disconnect()
+    setActiveConnection(null)
+    setStatus('Not connected')
+  }
+
+  async function deleteConnection(id: string): Promise<void> {
+    try {
+      const saved = await window.desktop.deleteConnection(id)
+      setConnections(saved)
+      if (activeConnection?.id === id) {
+        setActiveConnection(null)
+        setStatus('Connection deleted')
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not delete connection')
+    }
+  }
+
+  async function executeQuery(): Promise<void> {
+    if (!activeConnection) {
+      setQueryError('Connect to a UniDB server before executing a query.')
+      return
+    }
+    setBusy(true)
+    setQueryError('')
+    setResult(null)
+    const started = performance.now()
+    try {
+      const response = await window.desktop.executeQuery(query)
+      setResult(response)
+      setElapsedMs(Math.round(performance.now() - started))
+    } catch (error) {
+      setQueryError(error instanceof Error ? error.message : 'Query execution failed')
+      setElapsedMs(Math.round(performance.now() - started))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function handleEditorKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault()
+      void executeQuery()
+    }
+  }
 
   return (
     <main className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark"><Database size={19} strokeWidth={2.2} /></div>
-          <div className="brand-copy">
-            <span className="brand-name">UniDB</span>
-            <span className="brand-product">DESKTOP</span>
-          </div>
-          <button className="icon-button workspace-switch" aria-label="Switch workspace"><ChevronDown size={15} /></button>
-        </div>
-
-        <button className="connection-picker">
-          <span className="connection-indicator" />
-          <span className="connection-copy">
-            <strong>No connection</strong>
-            <small>Connect to a UniDB server</small>
-          </span>
+          <div className="brand-mark"><Database size={19} /></div>
+          <div><strong>UniDB</strong><span>DESKTOP</span></div>
           <ChevronDown size={15} className="muted-icon" />
-        </button>
-
-        <div className="sidebar-section">
-          <span className="section-label">WORKSPACE</span>
-          <nav>
-            {primaryNav.map(({ label, icon: Icon }) => (
-              <button
-                className={`nav-item ${activeNav === label ? 'active' : ''}`}
-                key={label}
-                onClick={() => setActiveNav(label)}
-              >
-                <Icon size={17} />
-                <span>{label}</span>
-                {label === 'SQL workspace' && <span className="nav-shortcut">⌘ K</span>}
+        </div>
+        <div className="sidebar-heading">
+          <span>CONNECTIONS</span>
+          <button className="icon-button small" onClick={() => setShowConnectionForm(true)} title="Add connection"><Plus size={16} /></button>
+        </div>
+        <button className="add-connection" onClick={() => setShowConnectionForm(true)}><Plus size={16} /> Add connection</button>
+        <div className="connection-list">
+          {connections.length === 0 && <p className="empty-copy">Your saved connections will appear here.</p>}
+          {connections.map((connection) => (
+            <div className={'connection-item' + (activeConnection?.id === connection.id ? ' selected' : '')} key={connection.id}>
+              <button className="connection-select" onClick={() => void connectTo(connection)} disabled={busy}>
+                <Database size={16} />
+                <span><strong>{connection.name}</strong><small>{connection.host}:{connection.port}</small></span>
+                {activeConnection?.id === connection.id && <span className="connected-dot" />}
               </button>
-            ))}
-          </nav>
+              <button className="icon-button small delete-button" title="Delete connection" onClick={() => void deleteConnection(connection.id)}><Trash2 size={14} /></button>
+            </div>
+          ))}
         </div>
-
-        <div className="sidebar-section recent-section">
-          <div className="section-heading">
-            <span className="section-label">RECENT</span>
-            <button className="tiny-icon-button" aria-label="Add recent item"><Plus size={14} /></button>
-          </div>
-          <div className="empty-recent">
-            <Clock3 size={16} />
-            <span>Your recent work will<br />show up here.</span>
-          </div>
-        </div>
-
         <div className="sidebar-bottom">
-          <button className="nav-item"><CircleHelp size={17} /><span>Help & feedback</span></button>
-          <button className="nav-item"><Settings2 size={17} /><span>Preferences</span></button>
-          <div className="profile-row">
-            <div className="avatar">S</div>
-            <div className="profile-copy"><strong>Local workspace</strong><small>Personal environment</small></div>
-            <button className="tiny-icon-button" aria-label="Workspace options"><ChevronDown size={14} /></button>
-          </div>
+          <div className="sidebar-link"><History size={16} /> Query history <span>Later</span></div>
+          <div className="sidebar-link"><Settings2 size={16} /> Preferences <span>Later</span></div>
+          <div className="sidebar-link"><CircleHelp size={16} /> Help & feedback</div>
+          <div className="local-profile"><div className="avatar">U</div><div><strong>Local workspace</strong><small>Stored on this device</small></div></div>
         </div>
       </aside>
 
       <section className="main-panel">
         <header className="topbar">
-          <div className="breadcrumbs"><span>Workspace</span><span className="crumb-divider">/</span><strong>{activeNav}</strong></div>
-          <div className="topbar-actions">
-            <span className="build-label">EARLY ACCESS</span>
-            <button className="icon-button" aria-label="Search"><Search size={17} /></button>
-            <button className="icon-button" aria-label="Activity"><Activity size={17} /></button>
-            <div className="topbar-divider" />
-            <button className="icon-button" aria-label="Download updates"><ArrowDownToLine size={17} /></button>
+          <div className="breadcrumbs"><span>Workspace</span><span>/</span><strong>Query editor</strong></div>
+          <div className="topbar-right">
+            <span className={'connection-status' + (activeConnection ? ' online' : '')}><i />{activeConnection ? activeConnection.name : 'Not connected'}</span>
+            {activeConnection && <button className="secondary-button compact" onClick={() => void disconnect()}>Disconnect</button>}
           </div>
         </header>
-
-        <div className="page-content">
-          <div className="welcome-row">
-            <div>
-              <div className="eyebrow"><Sparkles size={13} /> YOUR DATABASE WORKSPACE</div>
-              <h1>Good to see you.</h1>
-              <p className="page-subtitle">A clear view of your data starts here.</p>
-            </div>
-            <button className="primary-button" onClick={() => setActiveNav('SQL workspace')}>
-              <Plus size={16} /> New workspace
-            </button>
+        <div className="workspace">
+          <div className="workspace-heading">
+            <div><div className="eyebrow"><Code2 size={14} /> QUERY WORKSPACE</div><h1>Query editor</h1><p>Write a UQL statement and run it against your UniDB server.</p></div>
+            <button className="primary-button" onClick={() => setShowConnectionForm(true)}><Plus size={16} /> New connection</button>
           </div>
-
-          <section className="connection-card">
-            <div className="connection-card-art">
-              <div className="orbit orbit-one" />
-              <div className="orbit orbit-two" />
-              <div className="database-illustration"><Database size={48} strokeWidth={1.15} /></div>
-              <span className="art-dot dot-one" /><span className="art-dot dot-two" /><span className="art-dot dot-three" />
-            </div>
-            <div className="connection-card-content">
-              <span className="status-pill"><span /> NOT CONNECTED</span>
-              <h2>Connect your first database</h2>
-              <p>Connect to a running UniDB server to explore tables, write SQL, and work with your data from one place.</p>
-              <button className="primary-button" disabled title="Database connections are coming in a later update">
-                <Plus size={16} /> Add connection <span className="coming-soon">COMING SOON</span>
-              </button>
-              <span className="card-footnote"><LockKeyhole size={12} /> Your connection details will stay on this device.</span>
-            </div>
+          {!activeConnection && <div className="connection-banner"><PlugZap size={18} /><div><strong>Connect to a database to get started</strong><span>Choose a saved connection or add your UniDB server details.</span></div><button className="secondary-button" onClick={() => setShowConnectionForm(true)}>Add connection</button></div>}
+          <section className="editor-card">
+            <div className="panel-toolbar"><div className="tab-label"><Code2 size={15} /> query.uql <span className="unsaved-dot" /></div><span className="editor-hint">UQL · One statement per execution</span></div>
+            <div className="editor-body"><div className="line-number">1</div><textarea aria-label="UQL query editor" spellCheck={false} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={handleEditorKeyDown} placeholder="Write your UQL query here…" /></div>
+            <div className="editor-footer"><span>⌘ Enter to execute</span><button className="primary-button execute-button" onClick={() => void executeQuery()} disabled={busy || !activeConnection}>{busy ? <LoaderCircle size={15} className="spin" /> : <Play size={15} fill="currentColor" />}{busy ? 'Running…' : 'Execute query'}</button></div>
           </section>
-
-          <div className="section-heading overview-heading">
-            <div><h3>Get started</h3><p>Everything you need, in one workspace.</p></div>
-            <span className="subtle-label">3 QUICK STEPS</span>
-          </div>
-
-          <div className="steps-grid">
-            <article className="step-card">
-              <div className="step-icon purple"><Wifi size={18} /></div>
-              <span className="step-number">01</span>
-              <h3>Connect a server</h3>
-              <p>Point UniDB Desktop to your running UniDB server.</p>
-              <span className="step-link disabled-link">Connection setup <ArrowLeftRight size={13} /></span>
-            </article>
-            <article className="step-card">
-              <div className="step-icon blue"><TerminalSquare size={18} /></div>
-              <span className="step-number">02</span>
-              <h3>Explore your data</h3>
-              <p>Browse tables and understand what lives in your database.</p>
-              <span className="step-link disabled-link">Table browser <FolderClosed size={13} /></span>
-            </article>
-            <article className="step-card">
-              <div className="step-icon green"><Code2 size={18} /></div>
-              <span className="step-number">03</span>
-              <h3>Write your first query</h3>
-              <p>Use the SQL workspace to query and inspect results.</p>
-              <span className="step-link disabled-link">Open SQL editor <FilePlus2 size={13} /></span>
-            </article>
-          </div>
-
-          <div className="bottom-note">
-            <div className="note-icon"><ShieldCheck size={17} /></div>
-            <div><strong>Built with security in mind</strong><span>UniDB Desktop runs locally. It connects to your server only when you choose to.</span></div>
-            <button className="text-button">How it works <ArrowLeftRight size={13} /></button>
-          </div>
+          <section className="results-card">
+            <div className="results-toolbar"><div><strong>Results</strong><span>{result?.kind === 'rows' ? result.rows.length + ' rows' : result?.kind === 'command' ? 'Command completed' : 'Query output'}</span></div>{elapsedMs !== null && <span className="duration">{elapsedMs} ms</span>}</div>
+            {queryError && <div className="error-state"><X size={17} /><div><strong>Query failed</strong><span>{queryError}</span></div></div>}
+            {!queryError && !result && <div className="empty-results"><Database size={24} /><strong>No results yet</strong><span>Execute a query to see its results here.</span></div>}
+            {result?.kind === 'rows' && <div className="table-scroll"><table className="results-table"><thead><tr>{result.columns.map((column) => <th key={column.name}>{column.name}<small>{column.type}</small></th>)}</tr></thead><tbody>{result.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((value, columnIndex) => <td key={columnIndex}>{String(value)}</td>)}</tr>)}{result.rows.length === 0 && <tr><td colSpan={Math.max(result.columns.length, 1)} className="no-rows">The query returned no rows.</td></tr>}</tbody></table></div>}
+            {result?.kind === 'command' && <div className="command-result"><Check size={18} /><div><strong>{result.message}</strong><span>{result.affected_rows} affected rows</span></div></div>}
+          </section>
+          <div className="security-note"><ShieldCheck size={15} /><span>Connection details are stored locally on this device. The current client supports non-TLS TCP connections only. TLS support will be added separately.</span></div>
         </div>
-
-        <footer className="statusbar">
-          <div><span className="statusbar-dot" /> All systems ready</div>
-          <div><span>UniDB Desktop v{appVersion}</span><span className="status-divider" /><span>{window.desktop.platform}</span><span className="status-divider" /><span><Command size={12} /> Shortcuts</span></div>
-        </footer>
+        <footer className="statusbar"><span><i className={activeConnection ? 'online' : ''} />{status}</span><span>UniDB Desktop v{appVersion} <b /> {window.desktop.platform}</span></footer>
       </section>
+
+      {showConnectionForm && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowConnectionForm(false) }}>
+        <section className="connection-modal" role="dialog" aria-modal="true" aria-labelledby="connection-title">
+          <div className="modal-heading"><div><span className="eyebrow">DATABASE SETUP</span><h2 id="connection-title">Add connection</h2><p>Enter the address of your running UniDB server.</p></div><button className="icon-button" onClick={() => setShowConnectionForm(false)} aria-label="Close"><X size={18} /></button></div>
+          <label>Connection name<input value={connectionName} onChange={(event) => setConnectionName(event.target.value)} placeholder="e.g. Local UniDB" autoFocus /></label>
+          <label>Host<input value={host} onChange={(event) => setHost(event.target.value)} placeholder="127.0.0.1" /></label>
+          <label>Port<input type="number" min="1" max="65535" value={port} onChange={(event) => setPort(event.target.value)} placeholder="7432" /></label>
+          <div className="modal-note"><ShieldCheck size={15} /> Only connection name, host and port are saved. Do not use this form for remote servers requiring TLS yet.</div>
+          <div className="modal-actions"><button className="secondary-button" onClick={() => setShowConnectionForm(false)}>Cancel</button><button className="primary-button" onClick={() => void saveConnection()}><Check size={15} /> Save connection</button></div>
+        </section>
+      </div>}
     </main>
   )
 }
